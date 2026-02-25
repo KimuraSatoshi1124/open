@@ -2,20 +2,47 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>錯視調整ゲーム </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>錯視調整ゲーム</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #e0e0e0; margin: 0; padding: 20px; }
-        canvas { background: white; border: 4px solid #333; border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); }
-        .info { margin: 10px; font-weight: bold; min-height: 1.2em; }
-        #stage-title { font-size: 1.5em; margin-bottom: 5px; }
-        .controls { color: #666; font-size: 0.9em; margin-top: 10px; }
+        body { font-family: sans-serif; text-align: center; background: #f0f0f0; margin: 0; padding: 10px; touch-action: manipulation; }
+        .container { max-width: 800px; margin: 0 auto; }
+        canvas { 
+            background: white; border: 3px solid #333; border-radius: 12px; 
+            max-width: 100%; height: auto; /* 画面幅に合わせて自動縮小 */
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .info { margin: 10px; font-weight: bold; min-height: 1.5em; color: #333; }
+        #stage-title { font-size: 1.4em; margin-top: 10px; color: #d32f2f; }
+        
+        /* 操作ボタンのスタイル */
+        .btn-group { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+        button { 
+            padding: 20px 35px; font-size: 1.5em; font-weight: bold;
+            border: none; border-radius: 50px; background: #333; color: white;
+            cursor: pointer; box-shadow: 0 4px #1a1a1a;
+            user-select: none; -webkit-user-select: none;
+        }
+        button:active { transform: translateY(2px); box-shadow: 0 2px #1a1a1a; background: #555; }
+        .btn-enter { background: #d32f2f; box-shadow: 0 4px #a02020; }
+        .btn-enter:active { box-shadow: 0 2px #a02020; background: #b71c1c; }
+        .hint { font-size: 0.8em; color: #888; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <div id="stage-title">Stage 1: ミュラー・リヤー錯視</div>
-    <div id="message" class="info">同じ長さ・大きさ・一直線に見えるよう調整してください</div>
-    <canvas id="gameCanvas" width="800" height="400"></canvas>
-    <div id="ui-controls" class="controls">[←][→] または [↑][↓] で調整 / [Enter] で判定</div>
+    <div class="container">
+        <div id="stage-title">Stage 1: ミュラー・リヤー錯視</div>
+        <div id="message" class="info">同じ長さに見えるよう調整してください</div>
+        
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        
+        <div class="btn-group">
+            <button id="btn-minus">ー</button>
+            <button class="btn-enter" id="btn-enter">判定 / 次へ</button>
+            <button id="btn-plus">＋</button>
+        </div>
+        <p class="hint">PC：矢印キーとEnter / スマホ：ボタン長押しで連続調整</p>
+    </div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -28,36 +55,34 @@
         let isJudging = false;
         let isFinished = false;
         let animProgress = 0;
+        let moveInterval = null;
         const results = [];
 
         const stages = [
-            { name: "ミュラー・リヤー錯視", target: 200, unit: "px", init: 150 },
-            { name: "エビングハウス錯視", target: 30, unit: "px", init: 50 },
-            { name: "明るさの対比", target: 128, unit: "値", init: 180 },
-            { name: "ホワイト効果", target: 120, unit: "値", init: 80 },
-            { name: "正方形・ダイヤモンド錯視", target: 100, unit: "px", init: 85 },
-            { name: "ポッゲンドルフ錯視", target: 120, unit: "px", init: 180 } 
+            { name: "ミュラー・リヤー錯視", target: 200, unit: "px", init: 150, msg: "同じ長さに見えるよう調整してください" },
+            { name: "エビングハウス錯視", target: 30, unit: "px", init: 50, msg: "中心の円が同じ大きさに見えるよう調整してください" },
+            { name: "明るさの対比", target: 128, unit: "値", init: 180, msg: "中心の四角が同じ明るさに見えるよう調整してください" },
+            { name: "ホワイト効果", target: 120, unit: "値", init: 80, msg: "グレーのバーが同じ明るさに見えるよう調整してください" },
+            { name: "正方形・ダイヤモンド錯視", target: 100, unit: "px", init: 85, msg: "右の図形を左と同じサイズに調整してください" },
+            { name: "ポッゲンドルフ錯視", target: 120, unit: "px", init: 180, msg: "左右の線が一直線につながるよう調整してください" }
         ];
 
+        // --- 描画ロジック (統合・修正済み) ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (isFinished) { drawResult(); return; }
-
             const s = stages[stage];
             const p = animProgress;
 
-            // --- Stage 1 - 4 ---
             if (stage === 0) {
-                const startX = 250;
-                drawArrowLine(startX, 150 + (p * 45), s.target, false); 
-                drawArrowLine(startX, 250 - (p * 45), playerValue, true);
-                if (isJudging && p >= 0.9) drawVerticalLine(startX, s.target);
+                drawArrowLine(250, 150 + (p * 45), s.target, false); 
+                drawArrowLine(250, 250 - (p * 45), playerValue, true);
+                if (isJudging && p >= 0.9) drawVerticalLine(250, s.target);
             } 
             else if (stage === 1) {
-                const leftX = 250 + (p * 150);
-                const rightX = 550 - (p * 150);
-                drawFlower(leftX, 200, s.target, 45, 6);
-                drawFlower(rightX, 200, playerValue, 15, 8);
+                const lx = 250 + (p * 150), rx = 550 - (p * 150);
+                drawFlower(lx, 200, s.target, 45, 6);
+                drawFlower(rx, 200, playerValue, 15, 8);
                 if (isJudging && p >= 0.9) drawVerticalLine(400 - s.target, s.target * 2);
             }
             else if (stage === 2) {
@@ -80,128 +105,115 @@
                     ctx.globalAlpha = 1;
                 }
             }
-            // --- Stage 5---
             else if (stage === 4) {
-                const leftX = 200 + (p * (400 - s.target/2 - 200));
-                const rightX = 600 - (p * (600 - (400 + playerValue/2)));
+                const lx = 200 + (p * (400 - s.target/2 - 200)), rx = 600 - (p * (600 - (400 + playerValue/2)));
                 const angle = (Math.PI / 4) * (1 - p);
-                drawRect(leftX, 200, s.target, 0);
-                drawRect(rightX, 200, playerValue, angle); 
-                if (isJudging && p >= 0.9) drawVerticalLine(400 - s.target, s.target);
+                drawRect(lx, 200, s.target, 0); drawRect(rx, 200, playerValue, angle);
             }
-            // --- Stage 6---
             else if (stage === 5) {
-                const lx = 350, rx = 450;
-                const sy = 280, ey = 200; // 左線の座標
-                const tx = rx, ty = 120; // ターゲット(正解)座標
-
-                // 1. 赤い点線 (左の線 始点(250, 280)からターゲット(450, 120)を通る直線)
+                const lx = 350, rx = 450, sy = 280, ey = 200;
                 if (isJudging) {
-                    ctx.save();
-                    ctx.strokeStyle = "red"; ctx.setLineDash([5, 5]); ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(lx - 100, sy); 
-                    ctx.lineTo(rx + 100, 40); // 右端まで一直線に
-                    ctx.stroke();
-                    ctx.restore();
+                    ctx.save(); ctx.strokeStyle = "red"; ctx.setLineDash([5, 5]); ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(lx - 100, sy); ctx.lineTo(rx + 100, 40); ctx.stroke(); ctx.restore();
                 }
-
-                // 2. 線の描画
                 ctx.strokeStyle = "#333"; ctx.lineWidth = 3;
-                ctx.beginPath(); // 左の線 (固定)
-                ctx.moveTo(lx - 100, sy); ctx.lineTo(lx, ey); ctx.stroke();
-                
-                ctx.beginPath(); // 右の線 (プレイヤーが上下に動かす)
-                ctx.moveTo(rx, playerValue); ctx.lineTo(rx + 100, playerValue - 80); ctx.stroke();
-
-                // 3. 中央の壁 (判定時に消去)
-                if (p < 1) {
-                    ctx.save();
-                    ctx.globalAlpha = 1 - p;
-                    ctx.fillStyle = "#333"; ctx.fillRect(lx, 100, 100, 200);
-                    ctx.restore();
-                }
+                ctx.beginPath(); ctx.moveTo(lx - 100, sy); ctx.lineTo(lx, ey); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(rx, playerValue); ctx.lineTo(rx + 100, playerValue - 80); ctx.stroke();
+                if (p < 1) { ctx.save(); ctx.globalAlpha = 1 - p; ctx.fillStyle = "#333"; ctx.fillRect(lx, 100, 100, 200); ctx.restore(); }
             }
 
             if (isJudging && p >= 1) {
-                ctx.fillStyle = "red"; ctx.font = "bold 24px sans-serif"; ctx.textAlign = "center";
-                ctx.fillText(`正解位置: ${s.target} / あなた: ${Math.round(playerValue)}`, 400, 50);
+                ctx.fillStyle = "#d32f2f"; ctx.font = "bold 24px sans-serif"; ctx.textAlign = "center";
+                ctx.fillText(`正解: ${s.target} / あなた: ${Math.round(playerValue)}`, 400, 50);
             }
         }
 
-        // --- 補助関数 ---
+        // --- 操作・イベント制御 ---
+        function startMove(dir) {
+            if (isJudging || isFinished) return;
+            playerValue += dir; draw();
+            moveInterval = setInterval(() => { playerValue += dir; draw(); }, 40);
+        }
+        function stopMove() { clearInterval(moveInterval); }
+
+        function handleEnter() {
+            if (isFinished) return;
+            if (!isJudging) { isJudging = true; updateAnim(); } 
+            else if (animProgress >= 1) {
+                results.push(Math.abs(playerValue - stages[stage].target));
+                if (stage < stages.length - 1) {
+                    stage++; playerValue = stages[stage].init; isJudging = false; animProgress = 0;
+                    titleEl.innerText = `Stage ${stage + 1}: ${stages[stage].name}`;
+                    msgEl.innerText = stages[stage].msg; draw();
+                } else { isFinished = true; draw(); }
+            }
+        }
+
+        function updateAnim() { if (isJudging && animProgress < 1) { animProgress += 0.02; draw(); requestAnimationFrame(updateAnim); } }
+
+        // ボタンのイベント登録 (タッチとクリック両対応)
+        const btnMinus = document.getElementById('btn-minus');
+        const btnPlus = document.getElementById('btn-plus');
+        const btnEnter = document.getElementById('btn-enter');
+
+        const addEvents = (el, dir) => {
+            el.addEventListener('mousedown', (e) => { e.preventDefault(); startMove(dir); });
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); startMove(dir); });
+            el.addEventListener('mouseup', stopMove);
+            el.addEventListener('touchend', stopMove);
+            el.addEventListener('mouseleave', stopMove);
+        };
+        addEvents(btnMinus, -1);
+        addEvents(btnPlus, 1);
+        btnEnter.addEventListener('click', handleEnter);
+
+        // キーボード操作
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') startMove(1);
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') startMove(-1);
+            if (e.key === 'Enter') handleEnter();
+        });
+        window.addEventListener('keyup', stopMove);
+
+        // --- 描画補助 (アップロードファイルより継承) ---
         function drawVerticalLine(x, w) {
             ctx.save(); ctx.strokeStyle = "rgba(255, 0, 0, 0.5)"; ctx.setLineDash([5, 5]);
             ctx.beginPath(); ctx.moveTo(x, 50); ctx.lineTo(x, 350); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x + w, 50); ctx.lineTo(x + w, 350); ctx.stroke();
-            ctx.restore();
+            ctx.beginPath(); ctx.moveTo(x + w, 50); ctx.lineTo(x + w, 350); ctx.stroke(); ctx.restore();
         }
-
         function drawRect(x, y, size, angle) {
             ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
             ctx.strokeStyle = "#333"; ctx.lineWidth = 2; ctx.strokeRect(-size/2, -size/2, size, size); ctx.restore();
         }
-
         function drawArrowLine(startX, y, len, outward) {
-            ctx.strokeStyle = "#333"; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(startX + len, y);
-            const wing = 20, ang = Math.PI / 6, dir = outward ? 1 : -1;
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(startX + len, y);
+            const wing = 20, ang = Math.PI/6, dir = outward ? 1 : -1;
             ctx.moveTo(startX, y); ctx.lineTo(startX + Math.cos(ang)*wing*dir, y - Math.sin(ang)*wing);
             ctx.moveTo(startX, y); ctx.lineTo(startX + Math.cos(ang)*wing*dir, y + Math.sin(ang)*wing);
             ctx.moveTo(startX + len, y); ctx.lineTo(startX + len - Math.cos(ang)*wing*dir, y - Math.sin(ang)*wing);
-            ctx.moveTo(startX + len, y); ctx.lineTo(startX + len - Math.cos(ang)*wing*dir, y + Math.sin(ang)*wing);
-            ctx.stroke();
+            ctx.moveTo(startX + len, y); ctx.lineTo(startX + len - Math.cos(ang)*wing*dir, y + Math.sin(ang)*wing); ctx.stroke();
         }
-
         function drawFlower(x, y, r, sr, count) {
             ctx.fillStyle = "#ffaa00"; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-            if (animProgress < 0.5) {
-                ctx.globalAlpha = 1 - (animProgress * 2); ctx.fillStyle = "#999";
+            if (!isJudging || animProgress < 0.5) {
+                ctx.globalAlpha = isJudging ? 1 - (animProgress * 2) : 1; ctx.fillStyle = "#999";
                 for(let i=0; i<count; i++) {
-                    const a = (Math.PI*2/count)*i;
-                    ctx.beginPath(); ctx.arc(x+Math.cos(a)*(r+sr+10), y+Math.sin(a)*(r+sr+10), sr, 0, Math.PI*2); ctx.fill();
+                    const a = (Math.PI*2/count)*i; ctx.beginPath(); ctx.arc(x+Math.cos(a)*(r+sr+10), y+Math.sin(a)*(r+sr+10), sr, 0, Math.PI*2); ctx.fill();
                 }
                 ctx.globalAlpha = 1;
             }
         }
-
         function drawResult() {
-            titleEl.innerText = "テスト結果";
-            ctx.fillStyle = "#333"; ctx.textAlign = "center"; ctx.font = "bold 20px sans-serif";
+            titleEl.innerText = "診断完了！"; msgEl.innerText = "数値が低いほど錯視に強い（騙されにくい）脳です";
             let total = 0;
             results.forEach((res, i) => {
-                ctx.fillText(`${stages[i].name}: 誤差 ${res.toFixed(1)}`, 400, 100 + i * 40);
+                ctx.fillStyle = "#333"; ctx.font = "18px sans-serif"; ctx.textAlign = "left";
+                ctx.fillText(`${stages[i].name}: 誤差 ${res.toFixed(1)}`, 250, 100 + i * 35);
                 total += res;
             });
-            ctx.fillStyle = "#d32f2f"; ctx.font = "bold 32px sans-serif";
-            ctx.fillText(`合計ズレ: ${total.toFixed(1)}`, 400, 360);
+            ctx.fillStyle = "#d32f2f"; ctx.font = "bold 32px sans-serif"; ctx.textAlign = "center";
+            ctx.fillText(`総合スコア: ${total.toFixed(1)}`, 400, 350);
         }
-
-        function update() {
-            if (isJudging && animProgress < 1) {
-                animProgress += 0.015; draw();
-                requestAnimationFrame(update);
-            }
-        }
-
-        window.addEventListener('keydown', (e) => {
-            if (isFinished) return;
-            if (isJudging && animProgress >= 1) {
-                if (e.key === 'Enter') {
-                    results.push(Math.abs(playerValue - stages[stage].target));
-                    if (stage < stages.length - 1) {
-                        stage++; playerValue = stages[stage].init;
-                        isJudging = false; animProgress = 0;
-                        titleEl.innerText = `Stage ${stage + 1}: ${stages[stage].name}`;
-                        draw();
-                    } else { isFinished = true; draw(); }
-                }
-                return;
-            }
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { playerValue += 1; draw(); }
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { playerValue -= 1; draw(); }
-            if (e.key === 'Enter' && !isJudging) { isJudging = true; update(); }
-        });
 
         draw();
     </script>
