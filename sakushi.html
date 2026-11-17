@@ -2,23 +2,28 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>錯視調整ゲーム</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #f0f0f0; margin: 0; padding: 10px; touch-action: manipulation; }
         .container { max-width: 800px; margin: 0 auto; }
         canvas { 
             background: white; border: 3px solid #333; border-radius: 12px; 
-            max-width: 100%; height: auto; /* 画面幅に合わせて自動縮小 */
+            box-sizing: border-box; max-width: 100%; height: auto;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
         .info { margin: 10px; font-weight: bold; min-height: 1.5em; color: #333; }
         #stage-title { font-size: 1.4em; margin-top: 10px; color: #d32f2f; }
         
-        /* 操作ボタンのスタイル */
-        .btn-group { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+        .btn-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 16px; }
+        [hidden] { display: none !important; }
+        .adjust { touch-action: none; min-width: 72px; }
+        .results { width: 100%; border-collapse: collapse; background: white; color: #333; }
+        .results th, .results td { padding: 10px 4px; border-bottom: 1px solid #ddd; }
+        .results th[scope="row"] { text-align: left; overflow-wrap: anywhere; }
+        .results td { white-space: nowrap; font-variant-numeric: tabular-nums; }
         button { 
-            padding: 20px 35px; font-size: 1.5em; font-weight: bold;
+            min-height: 48px; padding: 12px 20px; font-size: 1.125em; font-weight: bold;
             border: none; border-radius: 50px; background: #333; color: white;
             cursor: pointer; box-shadow: 0 4px #1a1a1a;
             user-select: none; -webkit-user-select: none;
@@ -26,22 +31,33 @@
         button:active { transform: translateY(2px); box-shadow: 0 2px #1a1a1a; background: #555; }
         .btn-enter { background: #d32f2f; box-shadow: 0 4px #a02020; }
         .btn-enter:active { box-shadow: 0 2px #a02020; background: #b71c1c; }
-        .hint { font-size: 0.8em; color: #888; margin-top: 10px; }
+        button:disabled { opacity: 0.45; cursor: default; transform: none; }
+        .hint { font-size: 0.85em; color: #555; margin-top: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div id="stage-title">Stage 1: ミュラー・リヤー錯視</div>
-        <div id="message" class="info">同じ長さに見えるよう調整してください</div>
-        
+        <div id="stage-title"></div>
+        <div id="message" class="info" aria-live="polite"></div>
+
         <canvas id="gameCanvas" width="800" height="400"></canvas>
-        
-        <div class="btn-group">
-            <button id="btn-minus">ー</button>
-            <button class="btn-enter" id="btn-enter">判定 / 次へ</button>
-            <button id="btn-plus">＋</button>
+        <table class="results" id="results" aria-label="各ステージの結果" hidden>
+            <thead>
+                <tr><th scope="col">ステージ</th><th scope="col">基準値</th><th scope="col">回答値</th><th scope="col">差</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div class="btn-group" id="adjustments">
+            <button type="button" class="adjust" id="btn-minus" aria-label="値を減らす">−</button>
+            <button type="button" class="adjust" id="btn-plus" aria-label="値を増やす">＋</button>
         </div>
-        <p class="hint">PC：矢印キーとEnter / スマホ：ボタン長押しで連続調整</p>
+        <div class="btn-group">
+            <button type="button" id="btn-back">前へ</button>
+            <button type="button" class="btn-enter" id="btn-enter">判定する</button>
+            <button type="button" class="btn-enter" id="btn-restart" hidden>もう一度</button>
+        </div>
+        <p class="hint" id="hint">＋・−ボタンまたは矢印キーで1段階調整。長押しで連続調整。</p>
     </div>
 
     <script>
@@ -50,28 +66,48 @@
         const titleEl = document.getElementById('stage-title');
         const msgEl = document.getElementById('message');
 
+        const adjustments = document.getElementById('adjustments');
+        const btnMinus = document.getElementById('btn-minus');
+        const btnPlus = document.getElementById('btn-plus');
+        const btnBack = document.getElementById('btn-back');
+        const btnEnter = document.getElementById('btn-enter');
+        const btnRestart = document.getElementById('btn-restart');
+        const results = document.getElementById('results');
+        const hint = document.getElementById('hint');
+
         let stage = 0;
-        let playerValue = 150;
-        let isJudging = false;
         let isFinished = false;
         let animProgress = 0;
-        let moveInterval = null;
-        const results = [];
+        let animationFrame = null;
+        let activeMove = null;
 
+        // 線の端、周囲の円、回転した正方形がキャンバス内に収まる範囲。
         const stages = [
-            { name: "ミュラー・リヤー錯視", target: 200, unit: "px", init: 150, msg: "同じ長さに見えるよう調整してください" },
-            { name: "エビングハウス錯視", target: 30, unit: "px", init: 50, msg: "中心の円が同じ大きさに見えるよう調整してください" },
-            { name: "明るさの対比", target: 128, unit: "値", init: 180, msg: "中心の四角が同じ明るさに見えるよう調整してください" },
-            { name: "ホワイト効果", target: 120, unit: "値", init: 80, msg: "グレーのバーが同じ明るさに見えるよう調整してください" },
-            { name: "正方形・ダイヤモンド錯視", target: 100, unit: "px", init: 85, msg: "右の図形を左と同じサイズに調整してください" },
-            { name: "ポッゲンドルフ錯視", target: 120, unit: "px", init: 180, msg: "左右の線が一直線につながるよう調整してください" }
+            { name: "ミュラー・リヤー錯視", target: 200, unit: "px", init: 150, min: 40, max: 540, msg: "同じ長さに見えるよう調整してください" },
+            { name: "エビングハウス錯視", target: 30, unit: "px", init: 50, min: 1, max: 160, msg: "中心の円が同じ大きさに見えるよう調整してください" },
+            { name: "明るさの対比", target: 128, unit: "値", init: 180, min: 0, max: 255, msg: "中心の四角が同じ明るさに見えるよう調整してください" },
+            { name: "ホワイト効果", target: 120, unit: "値", init: 80, min: 0, max: 255, msg: "グレーのバーが同じ明るさに見えるよう調整してください" },
+            { name: "正方形・ダイヤモンド錯視", target: 100, unit: "px", init: 85, min: 1, max: 280, msg: "右の図形を左と同じサイズに調整してください" },
+            { name: "ポッゲンドルフ錯視", target: 120, unit: "px", init: 180, min: 82, max: 398, msg: "左右の線が一直線につながるよう調整してください" }
         ];
 
-        // --- 描画ロジック (統合・修正済み) ---
+        let attempts;
+
+        function formatValue(value, unit) {
+            return `${value} ${unit}`;
+        }
+
+        function formatDifference(value, unit) {
+            return formatValue(value > 0 ? `+${value}` : value, unit);
+        }
+
+        // --- 描画ロジック ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (isFinished) { drawResult(); return; }
             const s = stages[stage];
+            const { value, answer } = attempts[stage];
+            const isJudging = answer !== null;
+            const playerValue = answer ?? value;
             const p = animProgress;
 
             if (stage === 0) {
@@ -81,8 +117,8 @@
             } 
             else if (stage === 1) {
                 const lx = 250 + (p * 150), rx = 550 - (p * 150);
-                drawFlower(lx, 200, s.target, 45, 6);
-                drawFlower(rx, 200, playerValue, 15, 8);
+                drawFlower(lx, 200, s.target, 45, 6, p);
+                drawFlower(rx, 200, playerValue, 15, 8, p);
                 if (isJudging && p >= 0.9) drawVerticalLine(400 - s.target, s.target * 2);
             }
             else if (stage === 2) {
@@ -124,58 +160,204 @@
 
             if (isJudging && p >= 1) {
                 ctx.fillStyle = "#d32f2f"; ctx.font = "bold 24px sans-serif"; ctx.textAlign = "center";
-                ctx.fillText(`正解: ${s.target} / あなた: ${Math.round(playerValue)}`, 400, 50);
+                ctx.fillText(`基準値 ${formatValue(s.target, s.unit)} / 回答値 ${formatValue(answer, s.unit)}`, 400, 50);
             }
         }
 
-        // --- 操作・イベント制御 ---
-        function startMove(dir) {
-            if (isJudging || isFinished) return;
-            playerValue += dir; draw();
-            moveInterval = setInterval(() => { playerValue += dir; draw(); }, 40);
+        // --- ステージ進行 ---
+        function showStage() {
+            stopMove();
+            cancelAnimationFrame(animationFrame);
+            animationFrame = null;
+
+            const s = stages[stage];
+            const judged = attempts[stage].answer !== null;
+            animProgress = judged ? 1 : 0;
+            isFinished = false;
+            titleEl.textContent = `Stage ${stage + 1}: ${s.name}`;
+            results.hidden = true;
+            canvas.hidden = false;
+            adjustments.hidden = false;
+            btnEnter.hidden = false;
+            btnRestart.hidden = true;
+            btnBack.disabled = stage === 0;
+            updateStageControls();
+            draw();
         }
-        function stopMove() { clearInterval(moveInterval); }
+
+        function updateStageControls() {
+            const judged = attempts[stage].answer !== null;
+            msgEl.textContent = judged ? '回答を確定しました' : stages[stage].msg;
+            hint.hidden = judged;
+            btnMinus.disabled = judged;
+            btnPlus.disabled = judged;
+            btnEnter.textContent = judged
+                ? (stage === stages.length - 1 ? '結果を見る' : '次へ')
+                : '判定する';
+        }
 
         function handleEnter() {
             if (isFinished) return;
-            if (!isJudging) { isJudging = true; updateAnim(); } 
-            else if (animProgress >= 1) {
-                results.push(Math.abs(playerValue - stages[stage].target));
-                if (stage < stages.length - 1) {
-                    stage++; playerValue = stages[stage].init; isJudging = false; animProgress = 0;
-                    titleEl.innerText = `Stage ${stage + 1}: ${stages[stage].name}`;
-                    msgEl.innerText = stages[stage].msg; draw();
-                } else { isFinished = true; draw(); }
+
+            const attempt = attempts[stage];
+            if (attempt.answer === null) {
+                stopMove();
+                attempt.answer = attempt.value;
+                updateStageControls();
+                animateJudgment();
+            } else if (stage < stages.length - 1) {
+                stage++;
+                showStage();
+            } else {
+                showResults();
             }
         }
 
-        function updateAnim() { if (isJudging && animProgress < 1) { animProgress += 0.02; draw(); requestAnimationFrame(updateAnim); } }
+        function animateJudgment() {
+            const start = performance.now();
+            function frame(now) {
+                animProgress = Math.min(1, Math.max(0, (now - start) / 800));
+                draw();
+                animationFrame = animProgress < 1 ? requestAnimationFrame(frame) : null;
+            }
+            animationFrame = requestAnimationFrame(frame);
+        }
 
-        // ボタンのイベント登録 (タッチとクリック両対応)
-        const btnMinus = document.getElementById('btn-minus');
-        const btnPlus = document.getElementById('btn-plus');
-        const btnEnter = document.getElementById('btn-enter');
+        function showResults() {
+            stopMove();
+            cancelAnimationFrame(animationFrame);
+            animationFrame = null;
+            isFinished = true;
+            titleEl.textContent = '結果';
+            msgEl.textContent = '差は回答値から基準値を引いた値です';
+            canvas.hidden = true;
+            adjustments.hidden = true;
+            hint.hidden = true;
+            btnEnter.hidden = true;
+            btnRestart.hidden = false;
 
-        const addEvents = (el, dir) => {
-            el.addEventListener('mousedown', (e) => { e.preventDefault(); startMove(dir); });
-            el.addEventListener('touchstart', (e) => { e.preventDefault(); startMove(dir); });
-            el.addEventListener('mouseup', stopMove);
-            el.addEventListener('touchend', stopMove);
-            el.addEventListener('mouseleave', stopMove);
-        };
-        addEvents(btnMinus, -1);
-        addEvents(btnPlus, 1);
+            const rows = stages.map(({ name, target, unit }, index) => {
+                const answer = attempts[index].answer;
+                const row = document.createElement('tr');
+                const heading = document.createElement('th');
+                heading.scope = 'row';
+                heading.textContent = name;
+                row.append(heading);
+                for (const value of [formatValue(target, unit), formatValue(answer, unit), formatDifference(answer - target, unit)]) {
+                    row.insertCell().textContent = value;
+                }
+                return row;
+            });
+            results.tBodies[0].replaceChildren(...rows);
+            results.hidden = false;
+            btnRestart.focus();
+        }
+
+        function restart() {
+            attempts = stages.map(({ init }) => ({ value: init, answer: null }));
+            stage = 0;
+            showStage();
+        }
+
         btnEnter.addEventListener('click', handleEnter);
-
-        // キーボード操作
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') startMove(1);
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') startMove(-1);
-            if (e.key === 'Enter') handleEnter();
+        btnBack.addEventListener('click', () => {
+            if (!isFinished && stage === 0) return;
+            if (!isFinished) stage--;
+            showStage();
+            if (btnBack.disabled || document.activeElement === document.body) btnEnter.focus();
         });
-        window.addEventListener('keyup', stopMove);
+        btnRestart.addEventListener('click', () => {
+            restart();
+            btnEnter.focus();
+        });
 
-        // --- 描画補助 (アップロードファイルより継承) ---
+        // --- 調整入力 ---
+        function canAdjust() {
+            return !isFinished && attempts[stage].answer === null;
+        }
+
+        function adjust(direction) {
+            if (!canAdjust()) return;
+            const { min, max } = stages[stage];
+            const attempt = attempts[stage];
+            const value = Math.max(min, Math.min(max, attempt.value + direction));
+            if (value !== attempt.value) {
+                attempt.value = value;
+                draw();
+            }
+        }
+
+        function startMove(source, id, direction) {
+            if (!canAdjust()) return;
+            stopMove();
+            const move = { source, id, timer: null };
+            activeMove = move;
+            adjust(direction);
+
+            function repeat() {
+                if (activeMove !== move) return;
+                adjust(direction);
+                move.timer = setTimeout(repeat, 40);
+            }
+            move.timer = setTimeout(repeat, 300);
+        }
+
+        function stopMove() {
+            if (activeMove === null) return;
+            clearTimeout(activeMove.timer);
+            activeMove = null;
+        }
+
+        function endMove(source, id) {
+            if (activeMove?.source === source && activeMove.id === id) stopMove();
+        }
+
+        function bindAdjustment(button, direction) {
+            button.addEventListener('pointerdown', (event) => {
+                if (event.button !== 0 || !canAdjust()) return;
+                event.preventDefault();
+                button.setPointerCapture(event.pointerId);
+                startMove('pointer', event.pointerId, direction);
+            });
+            for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+                button.addEventListener(type, (event) => endMove('pointer', event.pointerId));
+            }
+            button.addEventListener('contextmenu', (event) => event.preventDefault());
+            button.addEventListener('click', (event) => {
+                // キーボードや支援技術によるボタン操作。
+                if (event.detail === 0 && !event.pointerType) adjust(direction);
+            });
+        }
+
+        bindAdjustment(btnMinus, -1);
+        bindAdjustment(btnPlus, 1);
+
+        const arrowDirections = new Map([
+            ['ArrowLeft', -1], ['ArrowUp', -1], ['ArrowRight', 1], ['ArrowDown', 1]
+        ]);
+        window.addEventListener('keydown', (event) => {
+            const direction = arrowDirections.get(event.key);
+            if (direction && canAdjust()) {
+                event.preventDefault();
+                if (!event.repeat) startMove('key', event.key, direction);
+            } else if (event.key === 'Enter') {
+                if (event.repeat) {
+                    event.preventDefault();
+                } else if (!(event.target instanceof HTMLButtonElement)) {
+                    event.preventDefault();
+                    if (isFinished) btnRestart.click();
+                    else handleEnter();
+                }
+            }
+        });
+        window.addEventListener('keyup', (event) => endMove('key', event.key));
+        window.addEventListener('blur', stopMove);
+        document.addEventListener('focusout', stopMove);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) stopMove();
+        });
+
+        // --- 描画補助 ---
         function drawVerticalLine(x, w) {
             ctx.save(); ctx.strokeStyle = "rgba(255, 0, 0, 0.5)"; ctx.setLineDash([5, 5]);
             ctx.beginPath(); ctx.moveTo(x, 50); ctx.lineTo(x, 350); ctx.stroke();
@@ -193,29 +375,17 @@
             ctx.moveTo(startX + len, y); ctx.lineTo(startX + len - Math.cos(ang)*wing*dir, y - Math.sin(ang)*wing);
             ctx.moveTo(startX + len, y); ctx.lineTo(startX + len - Math.cos(ang)*wing*dir, y + Math.sin(ang)*wing); ctx.stroke();
         }
-        function drawFlower(x, y, r, sr, count) {
+        function drawFlower(x, y, r, sr, count, progress) {
             ctx.fillStyle = "#ffaa00"; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-            if (!isJudging || animProgress < 0.5) {
-                ctx.globalAlpha = isJudging ? 1 - (animProgress * 2) : 1; ctx.fillStyle = "#999";
+            if (progress < 0.5) {
+                ctx.globalAlpha = 1 - progress * 2; ctx.fillStyle = "#999";
                 for(let i=0; i<count; i++) {
                     const a = (Math.PI*2/count)*i; ctx.beginPath(); ctx.arc(x+Math.cos(a)*(r+sr+10), y+Math.sin(a)*(r+sr+10), sr, 0, Math.PI*2); ctx.fill();
                 }
                 ctx.globalAlpha = 1;
             }
         }
-        function drawResult() {
-            titleEl.innerText = "診断完了！"; msgEl.innerText = "数値が低いほど錯視に強い（騙されにくい）脳です";
-            let total = 0;
-            results.forEach((res, i) => {
-                ctx.fillStyle = "#333"; ctx.font = "18px sans-serif"; ctx.textAlign = "left";
-                ctx.fillText(`${stages[i].name}: 誤差 ${res.toFixed(1)}`, 250, 100 + i * 35);
-                total += res;
-            });
-            ctx.fillStyle = "#d32f2f"; ctx.font = "bold 32px sans-serif"; ctx.textAlign = "center";
-            ctx.fillText(`総合スコア: ${total.toFixed(1)}`, 400, 350);
-        }
-
-        draw();
+        restart();
     </script>
 </body>
 </html>
