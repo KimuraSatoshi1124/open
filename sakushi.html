@@ -18,10 +18,16 @@
         .btn-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 16px; }
         [hidden] { display: none !important; }
         .adjust { touch-action: none; min-width: 72px; }
+        #score-value { font-size: 2em; font-weight: bold; color: #d32f2f; margin: 16px 0; }
+        .score-formula { font-size: 0.85em; color: #555; line-height: 1.6; }
         .results { width: 100%; border-collapse: collapse; background: white; color: #333; }
         .results th, .results td { padding: 10px 4px; border-bottom: 1px solid #ddd; }
         .results th[scope="row"] { text-align: left; overflow-wrap: anywhere; }
         .results td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        @media (max-width: 480px) {
+            .results { font-size: 0.8rem; }
+            .results th, .results td { padding: 10px 3px; }
+        }
         button { 
             min-height: 48px; padding: 12px 20px; font-size: 1.125em; font-weight: bold;
             border: none; border-radius: 50px; background: #333; color: white;
@@ -41,9 +47,13 @@
         <div id="message" class="info" aria-live="polite"></div>
 
         <canvas id="gameCanvas" width="800" height="400"></canvas>
+        <section id="score-summary" aria-label="スコア" hidden>
+            <p id="score-value"></p>
+            <p class="score-formula">各問の点数＝100−（差の絶対値÷基準値×100）、最低0点。<br>スコアは6問の平均です。小数第1位まで表示します。</p>
+        </section>
         <table class="results" id="results" aria-label="各ステージの結果" hidden>
             <thead>
-                <tr><th scope="col">ステージ</th><th scope="col">基準値</th><th scope="col">回答値</th><th scope="col">差</th></tr>
+                <tr><th scope="col">ステージ</th><th scope="col">基準値</th><th scope="col">回答値</th><th scope="col">差</th><th scope="col">点数</th></tr>
             </thead>
             <tbody></tbody>
         </table>
@@ -74,6 +84,8 @@
         const btnRestart = document.getElementById('btn-restart');
         const results = document.getElementById('results');
         const hint = document.getElementById('hint');
+        const scoreSummary = document.getElementById('score-summary');
+        const scoreValue = document.getElementById('score-value');
 
         let stage = 0;
         let isFinished = false;
@@ -99,6 +111,11 @@
 
         function formatDifference(value, unit) {
             return formatValue(value > 0 ? `+${value}` : value, unit);
+        }
+
+        function calculateScore(answer, target) {
+            const relativeError = Math.abs(answer - target) / target;
+            return Math.max(0, 100 * (1 - relativeError));
         }
 
         // --- 描画ロジック ---
@@ -176,6 +193,7 @@
             isFinished = false;
             titleEl.textContent = `Stage ${stage + 1}: ${s.name}`;
             results.hidden = true;
+            scoreSummary.hidden = true;
             canvas.hidden = false;
             adjustments.hidden = false;
             btnEnter.hidden = false;
@@ -240,6 +258,11 @@
             btnEnter.hidden = true;
             btnRestart.hidden = false;
 
+            const scores = stages.map(({ target }, index) => calculateScore(attempts[index].answer, target));
+            const averageScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+            scoreValue.textContent = `スコア ${averageScore.toFixed(1)} / 100点`;
+            scoreSummary.hidden = false;
+
             const rows = stages.map(({ name, target, unit }, index) => {
                 const answer = attempts[index].answer;
                 const row = document.createElement('tr');
@@ -247,7 +270,7 @@
                 heading.scope = 'row';
                 heading.textContent = name;
                 row.append(heading);
-                for (const value of [formatValue(target, unit), formatValue(answer, unit), formatDifference(answer - target, unit)]) {
+                for (const value of [formatValue(target, unit), formatValue(answer, unit), formatDifference(answer - target, unit), `${scores[index].toFixed(1)} 点`]) {
                     row.insertCell().textContent = value;
                 }
                 return row;
