@@ -49,15 +49,15 @@
         </table>
 
         <div class="btn-group" id="adjustments">
-            <button type="button" class="adjust" id="btn-minus" aria-label="値を減らす">−</button>
-            <button type="button" class="adjust" id="btn-plus" aria-label="値を増やす">＋</button>
+            <button type="button" class="adjust" id="btn-minus">短く</button>
+            <button type="button" class="adjust" id="btn-plus">長く</button>
         </div>
         <div class="btn-group">
             <button type="button" id="btn-back">前へ</button>
             <button type="button" class="btn-enter" id="btn-enter">判定する</button>
             <button type="button" class="btn-enter" id="btn-restart" hidden>もう一度</button>
         </div>
-        <p class="hint" id="hint">＋・−ボタンまたは矢印キーで1段階調整。長押しで連続調整。</p>
+        <p class="hint" id="hint"></p>
     </div>
 
     <script>
@@ -83,12 +83,12 @@
 
         // 線の端、周囲の円、回転した正方形がキャンバス内に収まる範囲。
         const stages = [
-            { name: "ミュラー・リヤー錯視", target: 200, unit: "px", init: 150, min: 40, max: 540, msg: "同じ長さに見えるよう調整してください" },
-            { name: "エビングハウス錯視", target: 30, unit: "px", init: 50, min: 1, max: 160, msg: "中心の円が同じ大きさに見えるよう調整してください" },
-            { name: "明るさの対比", target: 128, unit: "値", init: 180, min: 0, max: 255, msg: "中心の四角が同じ明るさに見えるよう調整してください" },
-            { name: "ホワイト効果", target: 120, unit: "値", init: 80, min: 0, max: 255, msg: "グレーのバーが同じ明るさに見えるよう調整してください" },
-            { name: "正方形・ダイヤモンド錯視", target: 100, unit: "px", init: 85, min: 1, max: 280, msg: "右の図形を左と同じサイズに調整してください" },
-            { name: "ポッゲンドルフ錯視", target: 120, unit: "px", init: 180, min: 82, max: 398, msg: "左右の線が一直線につながるよう調整してください" }
+            { name: "ミュラー・リヤー錯視", target: 200, unit: "px", init: 150, min: 40, max: 540, decreaseLabel: "短く", increaseLabel: "長く", msg: "同じ長さに見えるよう調整してください" },
+            { name: "エビングハウス錯視", target: 30, unit: "px", init: 50, min: 1, max: 160, decreaseLabel: "小さく", increaseLabel: "大きく", msg: "中心の円が同じ大きさに見えるよう調整してください" },
+            { name: "明るさの対比", target: 128, unit: "値", init: 180, min: 0, max: 255, decreaseLabel: "濃く", increaseLabel: "薄く", msg: "中心の四角が同じ明るさに見えるよう調整してください" },
+            { name: "ホワイト効果", target: 120, unit: "値", init: 80, min: 0, max: 255, decreaseLabel: "濃く", increaseLabel: "薄く", msg: "グレーのバーが同じ明るさに見えるよう調整してください" },
+            { name: "正方形・ダイヤモンド錯視", target: 100, unit: "px", init: 85, min: 1, max: 280, decreaseLabel: "小さく", increaseLabel: "大きく", msg: "右の図形を左と同じサイズに調整してください" },
+            { name: "ポッゲンドルフ錯視", target: 120, unit: "px", init: 180, min: 82, max: 398, decreaseLabel: "↑ 上へ", increaseLabel: "↓ 下へ", msg: "左右の線が一直線につながるよう調整してください" }
         ];
 
         let attempts;
@@ -186,8 +186,12 @@
         }
 
         function updateStageControls() {
+            const s = stages[stage];
             const judged = attempts[stage].answer !== null;
-            msgEl.textContent = judged ? '回答を確定しました' : stages[stage].msg;
+            btnMinus.textContent = s.decreaseLabel;
+            btnPlus.textContent = s.increaseLabel;
+            hint.textContent = `←・↑キーで「${s.decreaseLabel}」、→・↓キーで「${s.increaseLabel}」。1回で1段階、長押しで連続調整。`;
+            msgEl.textContent = judged ? '回答を確定しました' : s.msg;
             hint.hidden = judged;
             btnMinus.disabled = judged;
             btnPlus.disabled = judged;
